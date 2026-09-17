@@ -26,19 +26,75 @@ const DATA_DIR = path.join(__dirname, 'data');
 const ACCOUNT_FILE = path.join(DATA_DIR, 'account.json');
 
 /* ---------------- Authentication ---------------- */
+/* Passwords are never kept in plaintext in memory: they are scrypt-hashed at
+   boot. Override defaults with OMYA_ADMIN_PASS / OMYA_TRADER_PASS env vars. */
+const SCRYPT_OPTS = { N: 16384, r: 8, p: 1 };
+function hashPassword(pw, salt = crypto.randomBytes(16)) {
+  return { salt, hash: crypto.scryptSync(String(pw), salt, 64, SCRYPT_OPTS) };
+}
+function verifyPassword(pw, rec) {
+  const cand = crypto.scryptSync(String(pw), rec.salt, 64, SCRYPT_OPTS);
+  return crypto.timingSafeEqual(cand, rec.hash);
+}
+const DUMMY_PW = hashPassword(crypto.randomBytes(16).toString('hex')); // for constant-time unknown-user path
+const DEFAULT_PASS = { admin: 'admin123', trader: 'trader123' };
 const USERS = {
-  admin:  { pass: 'admin123',  role: 'admin',  name: 'Administrator' },
-  trader: { pass: 'trader123', role: 'trader', name: 'Trader' },
+  admin:  { role: 'admin',  name: 'Administrator', ...hashPassword(process.env.OMYA_ADMIN_PASS  || DEFAULT_PASS.admin) },
+  trader: { role: 'trader', name: 'Trader',        ...hashPassword(process.env.OMYA_TRADER_PASS || DEFAULT_PASS.trader) },
 };
+for (const [u, v] of Object.entries(DEFAULT_PASS)) {
+  if (!process.env[`OMYA_${u.toUpperCase()}_PASS`]) console.warn(`[omya] WARNING: "${u}" is using the default password — set OMYA_${u.toUpperCase()}_PASS`);
+}
+const USERNAME_RE = /^[a-z0-9_.-]{1,32}$/;
+const PASSWORD_MAX = 128;
+
+/* --- brute-force protection: per-IP and per-account sliding window --- */
+const LOGIN_WINDOW_MS = 15 * MIN;
+const LOGIN_MAX_PER_IP = 20;
+const LOGIN_MAX_PER_USER = 5;
+const LOCKOUT_MS = 15 * MIN;
+const loginAttempts = new Map(); // key -> { fails: number[], lockedUntil }
+function clientIp(req) {
+  return (req.socket && req.socket.remoteAddress) || 'unknown';
+}
+function attemptRec(key) {
+  let r = loginAttempts.get(key);
+  if (!r) { r = { fails: [], lockedUntil: 0 }; loginAttempts.set(key, r); }
+  const cut = Date.now() - LOGIN_WINDOW_MS;
+  r.fails = r.fails.filter(t => t > cut);
+  return r;
+}
+function isLocked(key, max) {
+  const r = attemptRec(key);
+  if (r.lockedUntil > Date.now()) return true;
+  return r.fails.length >= max;
+}
+function recordFail(key, max) {
+  const r = attemptRec(key);
+  r.fails.push(Date.now());
+  if (r.fails.length >= max) r.lockedUntil = Date.now() + LOCKOUT_MS;
+}
+function clearFails(key) { loginAttempts.delete(key); }
+setInterval(() => { // GC stale entries
+  const cut = Date.now() - LOGIN_WINDOW_MS;
+  for (const [k, r] of loginAttempts) if (r.lockedUntil < Date.now() && !r.fails.some(t => t > cut)) loginAttempts.delete(k);
+}, 5 * MIN).unref();
+
+/* --- sessions: only a SHA-256 digest of the bearer token is stored/persisted --- */
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
-const SESSION_TTL = 30 * 24 * 3600 * 1000; // 30 days
-const sessions = new Map(); // token -> {user, role, name, loginAt}
+const SESSION_TTL = 30 * 24 * 3600 * 1000; // 30 days absolute
+const SESSION_IDLE = 7 * 24 * 3600 * 1000;  // 7 days idle
+const sessions = new Map(); // tokenHash -> {user, role, name, loginAt, lastSeen}
+function tokenHash(tok) { return crypto.createHash('sha256').update(String(tok)).digest('hex'); }
+function sessionAlive(v, now) {
+  return v && v.loginAt && now - v.loginAt < SESSION_TTL && now - (v.lastSeen || v.loginAt) < SESSION_IDLE;
+}
 function loadSessions() {
   try {
     const j = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
     const now = Date.now();
     for (const [k, v] of Object.entries(j)) {
-      if (v && v.loginAt && now - v.loginAt < SESSION_TTL) sessions.set(k, v);
+      if (k.length === 64 && sessionAlive(v, now)) sessions.set(k, v); // 64 = sha256 hex; drops legacy plaintext-token files
     }
     if (sessions.size) console.log(`[omya] restored ${sessions.size} session(s)`);
   } catch (e) { /* fresh */ }
@@ -49,20 +105,31 @@ function saveSessions() {
   sessSaveT = setTimeout(() => {
     try {
       fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(SESSIONS_FILE, JSON.stringify(Object.fromEntries(sessions)));
+      const tmp = SESSIONS_FILE + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(sessions)), { mode: 0o600 });
+      fs.renameSync(tmp, SESSIONS_FILE);
     } catch (e) { console.error('session persist failed', e.message); }
   }, 400);
 }
-function makeToken() { return crypto.randomBytes(24).toString('hex'); }
-function sessionOf(req, url) {
+function makeToken() { return crypto.randomBytes(32).toString('hex'); }
+function sessionOf(req, url, { allowQuery = false } = {}) {
   let tok = null;
   const h = req.headers['authorization'];
   if (h && h.startsWith('Bearer ')) tok = h.slice(7).trim();
-  if (!tok) tok = url.searchParams.get('token');
-  const s = tok && sessions.get(tok);
-  if (!s || Date.now() - s.loginAt > SESSION_TTL) { if (tok) sessions.delete(tok); return null; }
-  return Object.assign({ token: tok }, s);
+  if (!tok && allowQuery) tok = url.searchParams.get('token'); // only for EventSource, which cannot set headers
+  if (!tok || tok.length > 128) return null;
+  const key = tokenHash(tok);
+  const s = sessions.get(key);
+  const now = Date.now();
+  if (!sessionAlive(s, now)) { if (s) { sessions.delete(key); saveSessions(); } return null; }
+  if (now - (s.lastSeen || 0) > MIN) { s.lastSeen = now; saveSessions(); }
+  return Object.assign({ token: key }, s);
 }
+function revokeUserSessions(user) {
+  for (const [k, v] of sessions) if (v.user === user) sessions.delete(k);
+  saveSessions();
+}
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /* ---------------- Cheat engine (admin) ---------------- */
 const CHEAT_RUN_MS = 20000;   // slow run in the cheat direction
@@ -590,29 +657,65 @@ function engineCheck() {
 /* ---------------- API ---------------- */
 function json(res, code, obj) {
   const body = JSON.stringify(obj);
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...SEC_HEADERS });
   res.end(body);
 }
-function readBody(req) {
+const SEC_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'SAMEORIGIN',
+  'Referrer-Policy': 'no-referrer',
+};
+function readBody(req, limit = 64 * 1024) {
   return new Promise((resolve) => {
     let d = '';
-    req.on('data', c => { d += c; if (d.length > 1e6) req.destroy(); });
-    req.on('end', () => { try { resolve(d ? JSON.parse(d) : {}); } catch (e) { resolve({}); } });
+    req.on('data', c => { d += c; if (d.length > limit) { req.destroy(); resolve({}); } });
+    req.on('end', () => { try { const j = d ? JSON.parse(d) : {}; resolve(j && typeof j === 'object' ? j : {}); } catch (e) { resolve({}); } });
+    req.on('error', () => resolve({}));
   });
+}
+/* Same-origin enforcement for state-changing requests (CSRF hardening; the
+   browser front-end is served from this very origin, so cross-site POSTs are never legitimate). */
+function sameOrigin(req) {
+  const origin = req.headers.origin || (req.headers.referer ? (() => { try { return new URL(req.headers.referer).origin; } catch (e) { return null; } })() : null);
+  if (!origin) return true; // non-browser clients (curl etc.) — bearer token is still required
+  try { return new URL(origin).host === req.headers.host; } catch (e) { return false; }
 }
 
 async function handleAPI(req, res, url) {
   const p = url.pathname;
-  if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' }); return res.end(); }
+  if (req.method === 'OPTIONS') { res.writeHead(204, SEC_HEADERS); return res.end(); }
+  if (req.method === 'POST' && !sameOrigin(req)) return json(res, 403, { error: 'Cross-origin request rejected' });
 
   /* ----- public: login ----- */
   if (p === '/api/auth/login' && req.method === 'POST') {
-    const { username, password } = await readBody(req);
-    const u = USERS[String(username || '').toLowerCase()];
-    if (!u || u.pass !== String(password || '')) return json(res, 401, { error: 'Invalid account or password' });
+    const ip = clientIp(req);
+    const body = await readBody(req, 4096);
+    const username = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    if (!USERNAME_RE.test(username) || !password || password.length > PASSWORD_MAX) {
+      recordFail('ip:' + ip, LOGIN_MAX_PER_IP);
+      await sleep(300);
+      return json(res, 400, { error: 'Invalid account or password' });
+    }
+    if (isLocked('ip:' + ip, LOGIN_MAX_PER_IP) || isLocked('user:' + username, LOGIN_MAX_PER_USER)) {
+      res.setHeader('Retry-After', String(Math.ceil(LOCKOUT_MS / 1000)));
+      return json(res, 429, { error: 'Too many login attempts. Try again later.' });
+    }
+    const u = USERS[username];
+    const ok = u ? verifyPassword(password, u) : (verifyPassword(password, DUMMY_PW), false);
+    if (!ok) {
+      recordFail('ip:' + ip, LOGIN_MAX_PER_IP);
+      recordFail('user:' + username, LOGIN_MAX_PER_USER);
+      console.warn(`[omya] failed login user="${username}" ip=${ip}`);
+      await sleep(300 + Math.floor(Math.random() * 200));
+      return json(res, 401, { error: 'Invalid account or password' });
+    }
+    clearFails('ip:' + ip); clearFails('user:' + username);
     const tok = makeToken();
-    sessions.set(tok, { user: String(username).toLowerCase(), role: u.role, name: u.name, loginAt: Date.now() });
+    const now = Date.now();
+    sessions.set(tokenHash(tok), { user: username, role: u.role, name: u.name, loginAt: now, lastSeen: now, ip });
     saveSessions();
+    console.log(`[omya] login user="${username}" role=${u.role} ip=${ip}`);
     return json(res, 200, { ok: true, token: tok, role: u.role, name: u.name, login: account.login, server: SERVER_NAME });
   }
 
@@ -627,15 +730,30 @@ async function handleAPI(req, res, url) {
     saveSessions();
     return json(res, 200, { ok: true });
   }
+  if (p === '/api/auth/logout-all' && req.method === 'POST') {
+    revokeUserSessions(sess.user);
+    return json(res, 200, { ok: true });
+  }
 
   /* ----- admin ----- */
   if (p.startsWith('/api/admin/')) {
     if (sess.role !== 'admin') return json(res, 403, { error: 'Forbidden' });
     if (p === '/api/admin/login' && req.method === 'POST') {
-      const { username, password } = await readBody(req);
-      const u = USERS[String(username || '').toLowerCase()];
-      if (!u || u.pass !== String(password || '') || u.role !== 'admin') return json(res, 401, { error: 'Invalid administrator credentials' });
-      sess.role = 'admin'; sessions.set(sess.token, sess);
+      // Re-authentication (step-up) for the admin console. Never escalates a role.
+      const ip = clientIp(req);
+      if (isLocked('user:' + sess.user, LOGIN_MAX_PER_USER)) return json(res, 429, { error: 'Too many attempts. Try again later.' });
+      const body = await readBody(req, 4096);
+      const username = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
+      const password = typeof body.password === 'string' ? body.password : '';
+      const u = USERS[username];
+      const ok = username === sess.user && u && u.role === 'admin' && password.length <= PASSWORD_MAX && verifyPassword(password, u);
+      if (!ok) {
+        recordFail('user:' + sess.user, LOGIN_MAX_PER_USER);
+        console.warn(`[omya] failed admin re-auth user="${sess.user}" ip=${ip}`);
+        await sleep(300);
+        return json(res, 401, { error: 'Invalid administrator credentials' });
+      }
+      clearFails('user:' + sess.user);
       return json(res, 200, { ok: true, role: 'admin' });
     }
     if (p === '/api/admin/state') return json(res, 200, adminState());
@@ -808,13 +926,13 @@ async function handleAPI(req, res, url) {
 /* ---------------- SSE ---------------- */
 const sseClients = new Set();
 function sseInit(req, res, url) {
-  if (!sessionOf(req, url)) { res.writeHead(401, { 'Content-Type': 'text/plain' }); return res.end('Unauthorized'); }
+  if (!sessionOf(req, url, { allowQuery: true })) { res.writeHead(401, { 'Content-Type': 'text/plain', ...SEC_HEADERS }); return res.end('Unauthorized'); }
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-store',
     'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
     'X-Accel-Buffering': 'no',
+    ...SEC_HEADERS,
   });
   res.write(': connected\n\n');
   sseClients.add(res);
@@ -851,12 +969,12 @@ function serveStatic(req, res, url) {
       // SPA fallback
       fs.readFile(path.join(PUB, 'index.html'), (e2, b2) => {
         if (e2) { res.writeHead(404); res.end('Not found'); }
-        else { res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-store' }); res.end(b2); }
+        else { res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-store', ...SEC_HEADERS }); res.end(b2); }
       });
       return;
     }
     const ext = path.extname(abs).toLowerCase();
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': ext === '.html' ? 'no-store' : 'no-cache' });
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': ext === '.html' ? 'no-store' : 'no-cache', ...SEC_HEADERS });
     res.end(buf);
   });
 }
