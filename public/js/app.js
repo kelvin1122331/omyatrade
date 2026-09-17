@@ -12,8 +12,24 @@ const $$ = s => [...document.querySelectorAll(s)];
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const money = v => (v < 0 ? '-' : '') + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const sign = v => (v > 0 ? '+' : '') + v.toFixed(2);
+/* ---------- money formatting (IDR / USD display) ---------- */
+const RATE_FALLBACK = 16245;
+const fmtIDR = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 });
+const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+function idrRate() { const p = S.prices['USDIDR']; return p ? (p.b + p.a) / 2 : RATE_FALLBACK; }
+function acctCur() { return S.account?.currency || 'IDR'; }
+function toDisp(vAcct) {
+  if (S.dispCur === acctCur()) return vAcct;
+  return acctCur() === 'IDR' ? vAcct / idrRate() : vAcct * idrRate();
+}
+function fmtMoney(vAcct) {
+  const v = toDisp(vAcct);
+  return S.dispCur === 'IDR' ? fmtIDR.format(v) : fmtUSD.format(v);
+}
+function fmtPL(vAcct) {
+  const s = fmtMoney(Math.abs(vAcct));
+  return vAcct > 0 ? '+' + s : vAcct < 0 ? '-' + s : s;
+}
 const p2 = n => String(n).padStart(2, '0');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function fmtDT(t) {
@@ -41,10 +57,12 @@ const S = {
   tf: localStorage.getItem('ot.tf') || 'M15',
   ctype: localStorage.getItem('ot.ctype') || 'candles',
   lots: localStorage.getItem('ot.lots') || '0.10',
+  dispCur: localStorage.getItem('ot.dispcur') || 'IDR',
   sound: localStorage.getItem('ot.sound') !== '0',
   oct: localStorage.getItem('ot.oct') !== '0',
   connected: false,
   m1: new Map(),         // sym -> bars[]
+  spark: new Map(),      // sym -> {arr:[last bids]}
   tfHist: new Map(),     // sym|tf -> bars[] (server history, tf >= H1)
   disp: null,            // current display bars for chart
   dispKey: '',
@@ -199,20 +217,21 @@ function onTickFor(sym) {
   if (sym === S.cur) renderDepth();
   const a = S.account;
   if (a) {
+    const rate = acctCur() === 'IDR' ? idrRate() : 1;
     let fl = 0;
     for (const p of a.positions) {
-      p.profit = clientPL(p);
+      p.profit = clientPL(p) * rate;
       fl += p.profit;
     }
     a.floating = fl;
     a.equity = a.balance + fl;
     patchPositions();
     patchOrders();
-    const setM = (id, v) => { $(id).textContent = money(v); };
+    const setM = (id, v) => { $(id).textContent = fmtMoney(v); };
     setM('#acct-equity', a.equity);
     setM('#sum-equity', a.equity);
     const fl1 = $('#acct-floating'), fl2 = $('#sum-floating');
-    const txt = `${fl >= 0 ? '+' : ''}$${fl.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const txt = fmtPL(fl);
     fl1.textContent = txt; fl2.textContent = txt;
     fl1.className = fl > 0 ? 'pos' : fl < 0 ? 'neg' : '';
     fl2.className = fl > 0 ? 'pos' : fl < 0 ? 'neg' : '';
@@ -223,15 +242,17 @@ function onTickFor(sym) {
       le.className = lvl < 100 ? 'neg' : '';
     }
   }
+  const q = px(sym);
+  if (q.b) sparkPush(sym, q.b);
 }
 function onDeal(d) {
   const map = {
     executed: () => { sfx.exec(); toast('ok', 'Order executed', `${esc(d.side.toUpperCase())} ${d.volume.toFixed(2)} ${esc(d.symbol)} @ ${fpx(d.symbol, d.price)}<br>Ticket <b>#${d.ticket}</b>`); },
-    closed: () => { sfx.close(); toast(d.profit >= 0 ? 'ok' : 'err', d.partial ? 'Partial close' : 'Position closed', `${esc(d.symbol)} ${d.volume.toFixed(2)} lots @ ${fpx(d.symbol, d.price)} · P/L <b style="color:${d.profit >= 0 ? 'var(--up)' : 'var(--down)'}">${sign(d.profit)} USD</b>`); },
-    closed_all: () => { sfx.close(); toast('info', 'All positions closed', `Net result <b>${sign(d.profit)} USD</b>`); },
-    tp_hit: () => { sfx.tp(); toast('ok', 'Take Profit triggered', `${esc(d.side.toUpperCase())} ${esc(d.symbol)} ${d.volume.toFixed(2)} @ ${fpx(d.symbol, d.price)} · <b style="color:var(--up)">${sign(d.profit)} USD</b>`); },
-    sl_hit: () => { sfx.sl(); toast('err', 'Stop Loss triggered', `${esc(d.side.toUpperCase())} ${esc(d.symbol)} ${d.volume.toFixed(2)} @ ${fpx(d.symbol, d.price)} · <b style="color:var(--down)">${sign(d.profit)} USD</b>`); },
-    stopout: () => { sfx.alert(); toast('err', 'Stop Out', `Margin level fell below 20%. Position <b>#${d.ticket}</b> ${esc(d.symbol)} closed at a loss of <b>${sign(d.profit)} USD</b>.`, 8000); },
+    closed: () => { sfx.close(); toast(d.profit >= 0 ? 'ok' : 'err', d.partial ? 'Partial close' : 'Position closed', `${esc(d.symbol)} ${d.volume.toFixed(2)} lots @ ${fpx(d.symbol, d.price)} · P/L <b style="color:${d.profit >= 0 ? 'var(--up)' : 'var(--down)'}">${fmtPL(d.profit)}</b>`); },
+    closed_all: () => { sfx.close(); toast('info', 'All positions closed', `Net result <b>${fmtPL(d.profit)}</b>`); },
+    tp_hit: () => { sfx.tp(); toast('ok', 'Take Profit triggered', `${esc(d.side.toUpperCase())} ${esc(d.symbol)} ${d.volume.toFixed(2)} @ ${fpx(d.symbol, d.price)} · <b style="color:var(--up)">${fmtPL(d.profit)}</b>`); },
+    sl_hit: () => { sfx.sl(); toast('err', 'Stop Loss triggered', `${esc(d.side.toUpperCase())} ${esc(d.symbol)} ${d.volume.toFixed(2)} @ ${fpx(d.symbol, d.price)} · <b style="color:var(--down)">${fmtPL(d.profit)}</b>`); },
+    stopout: () => { sfx.alert(); toast('err', 'Stop Out', `Margin level fell below 20%. Position <b>#${d.ticket}</b> ${esc(d.symbol)} closed with result <b>${fmtPL(d.profit)}</b>.`, 8000); },
     pending_filled: () => { sfx.exec(); toast('ok', 'Pending order activated', `${esc(d.side.toUpperCase())} ${esc(d.symbol)} ${d.volume.toFixed(2)} @ ${fpx(d.symbol, d.price)}<br>Ticket <b>#${d.ticket}</b>`); },
     placed: () => { toast('gold', 'Pending order placed', `${esc(d.type.toUpperCase())} ${esc(d.symbol)} ${d.volume.toFixed(2)} @ ${fpx(d.symbol, d.price)}<br>Ticket <b>#${d.ticket}</b>`); },
     cancelled: () => { toast('info', 'Order cancelled', `Ticket <b>#${d.ticket}</b>`); },
@@ -264,6 +285,7 @@ function buildMarketWatch() {
           <span class="mw-code">${s}</span>
           <span class="mw-name">${esc(sp.disp)}</span>
         </div>
+        <canvas class="mw-spark" width="88" height="30" aria-hidden="true"></canvas>
         <div class="mw-quotes">
           <div class="mw-px"><span class="b">—</span><span class="a">—</span></div>
           <div class="mw-extra">
@@ -271,13 +293,16 @@ function buildMarketWatch() {
             <span class="mw-chg">—</span>
           </div>
         </div>`);
-      row.onclick = () => selectSymbol(s);
+      row.onclick = () => { selectSymbol(s); mobileGo('chart'); };
       wrap.appendChild(row);
       S.mwRefs[s] = {
         row,
         b: row.querySelector('.b'), a: row.querySelector('.a'),
         spr: row.querySelector('.mw-spread'), chg: row.querySelector('.mw-chg'),
+        spark: row.querySelector('.mw-spark'),
       };
+      const spk = S.spark.get(s);
+      if (spk && spk.arr.length > 1) drawSpark(S.mwRefs[s].spark, spk.arr);
     }
   }
   $('#mw-count').textContent = `${S.symList.length} symbols`;
@@ -307,6 +332,39 @@ function updateMW(s) {
     ref.chg.textContent = `${chg >= 0 ? '▲' : '▼'} ${Math.abs(chg).toFixed(2)}%`;
     ref.chg.className = 'mw-chg ' + (chg >= 0 ? 'up' : 'down');
   }
+}
+
+/* ---------------- sparklines (mini up/down chart per symbol) ---------------- */
+function sparkPush(sym, price) {
+  let o = S.spark.get(sym);
+  if (!o) { o = { arr: [] }; S.spark.set(sym, o); }
+  o.arr.push(price);
+  if (o.arr.length > 56) o.arr.shift();
+  const ref = S.mwRefs?.[sym];
+  if (ref?.spark) drawSpark(ref.spark, o.arr);
+}
+function drawSpark(cv, arr) {
+  const ctx = cv.getContext('2d');
+  const w = cv.width, h = cv.height;
+  ctx.clearRect(0, 0, w, h);
+  if (arr.length < 2) return;
+  let mn = Infinity, mx = -Infinity;
+  for (const v of arr) { if (v < mn) mn = v; if (v > mx) mx = v; }
+  if (mx - mn < 1e-12) { mn -= 1; mx += 1; }
+  const up = arr[arr.length - 1] >= arr[0];
+  ctx.beginPath();
+  for (let i = 0; i < arr.length; i++) {
+    const x = 2 + (i / (arr.length - 1)) * (w - 4);
+    const y = h - 3 - ((arr[i] - mn) / (mx - mn)) * (h - 6);
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.strokeStyle = up ? '#2ebd85' : '#f6465d';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = ctx.strokeStyle;
+  ctx.shadowBlur = 5;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
 }
 
 /* ---------------- depth ---------------- */
@@ -491,8 +549,7 @@ function renderOverlays() {
     for (const pos of acc.positions) {
       if (pos.symbol !== S.cur) continue;
       const col = pos.side === 'buy' ? '#2ebd85' : '#f6465d';
-      const profitTxt = pos.profit >= 0 ? '+' : '';
-      ov.push({ price: pos.openPrice, color: col, dash: [], label: `#${pos.ticket} ${pos.side.toUpperCase()} ${pos.volume.toFixed(2)} · ${profitTxt}${pos.profit.toFixed(2)}`, labelRight: true });
+      ov.push({ price: pos.openPrice, color: col, dash: [], label: `#${pos.ticket} ${pos.side.toUpperCase()} ${pos.volume.toFixed(2)} · ${fmtPL(pos.profit)}`, labelRight: true });
       if (pos.sl) ov.push({ price: pos.sl, color: 'rgba(246,70,93,.75)', dash: [6, 4], label: `SL ${fpx(S.cur, pos.sl)}` });
       if (pos.tp) ov.push({ price: pos.tp, color: 'rgba(46,189,133,.75)', dash: [6, 4], label: `TP ${fpx(S.cur, pos.tp)}` });
     }
@@ -544,22 +601,22 @@ function renderAccount() {
   const a = S.account;
   if (!a) return;
   $('#acct-no').textContent = `№ ${a.login}`;
-  $('#acct-lev').textContent = `1:${a.leverage}`;
+  $('#acct-lev').textContent = `1:${a.leverage} · ${a.currency}`;
   const set = (id, v) => { $(id).textContent = v; };
-  set('#acct-balance', money(a.balance));
-  set('#acct-equity', money(a.equity));
+  set('#acct-balance', fmtMoney(a.balance));
+  set('#acct-equity', fmtMoney(a.equity));
   const fl = $('#acct-floating');
-  fl.textContent = `${a.floating >= 0 ? '+' : ''}$${a.floating.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  fl.textContent = fmtPL(a.floating);
   fl.className = a.floating > 0 ? 'pos' : a.floating < 0 ? 'neg' : '';
-  set('#sum-balance', money(a.balance));
-  set('#sum-equity', money(a.equity));
-  set('#sum-margin', a.margin ? money(a.margin) : '—');
-  set('#sum-free', money(a.freeMargin));
+  set('#sum-balance', fmtMoney(a.balance));
+  set('#sum-equity', fmtMoney(a.equity));
+  set('#sum-margin', a.margin ? fmtMoney(a.margin) : '—');
+  set('#sum-free', fmtMoney(a.freeMargin));
   const lvl = $('#sum-level');
   lvl.textContent = a.marginLevel ? a.marginLevel.toFixed(1) + '%' : '—';
   lvl.className = a.marginLevel && a.marginLevel < 100 ? 'neg' : '';
   const fl2 = $('#sum-floating');
-  fl2.textContent = `${a.floating >= 0 ? '+' : ''}$${a.floating.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  fl2.textContent = fmtPL(a.floating);
   fl2.className = a.floating > 0 ? 'pos' : a.floating < 0 ? 'neg' : '';
   $('#badge-positions').textContent = a.positions.length;
   $('#badge-orders').textContent = a.orders.length;
@@ -581,8 +638,7 @@ function renderAccount() {
       const pos = a.positions.find(x => x.ticket === mTicket);
       if (pos) {
         const mp = $('#tm-mpl');
-        mp.textContent = `${sign(pos.profit)} USD`;
-        mp.style.color = pos.profit >= 0 ? 'var(--up)' : 'var(--down)';
+        mp.textContent = fmtPL(pos.profit);        mp.style.color = pos.profit >= 0 ? 'var(--up)' : 'var(--down)';
       }
     }
   }
@@ -636,7 +692,7 @@ function patchPositions() {
     if (!ref) continue;
     const cur = p.side === 'buy' ? px(p.symbol).b : px(p.symbol).a;
     ref.cur.textContent = fpx(p.symbol, cur);
-    ref.pl.textContent = sign(p.profit);
+    ref.pl.textContent = fmtPL(p.profit);
     ref.pl.className = 'c-pl ' + (p.profit >= 0 ? 'profit-pos' : 'profit-neg');
   }
 }
@@ -720,10 +776,10 @@ function renderHistory() {
       <td>${fpx(d.symbol, d.openPrice)}</td>
       <td>${fpx(d.symbol, d.closePrice)}</td>
       <td><span class="reason-badge ${reason[1]}">${reason[0]}</span></td>
-      <td class="${d.profit >= 0 ? 'profit-pos' : 'profit-neg'}">${sign(d.profit)}</td>
+      <td class="${d.profit >= 0 ? 'profit-pos' : 'profit-neg'}">${fmtPL(d.profit)}</td>
     </tr>`;
   }).join('');
-  $('#hist-total').innerHTML = `${list.length} deals · Net P/L <b class="${total >= 0 ? 'profit-pos' : 'profit-neg'}">${sign(total)} USD</b>`;
+  $('#hist-total').innerHTML = `${list.length} deals · Net P/L <b class="${total >= 0 ? 'profit-pos' : 'profit-neg'}">${fmtPL(total)}</b>`;
 }
 
 /* ---------------- mobile view helper ---------------- */
@@ -835,7 +891,8 @@ function setPendingHint() {
 }
 function updateMarginPreview() {
   const v = parseFloat($('#tm-volume').value) || 0;
-  $('#tm-margin').textContent = marginReq(S.cur, v) > 0 ? money(marginReq(S.cur, v)) : '—';
+  const mAcct = marginReq(S.cur, v) * (acctCur() === 'IDR' ? idrRate() : 1);
+  $('#tm-margin').textContent = mAcct > 0 ? fmtMoney(mAcct) : '—';
 }
 function volInput(input) {
   let v = parseFloat(input.value);
@@ -903,6 +960,24 @@ function wire() {
   $('#oc-buy').onclick = () => placeMarket('buy', parseFloat(S.lots));
   // new order
   $('#btn-new-order').onclick = () => openTicket();
+  const fab = $('#fab-order');
+  if (fab) fab.onclick = () => openTicket();
+  // currency display toggle (IDR / USD)
+  const curBtn = $('#btn-currency');
+  const renderCurToggle = () => {
+    curBtn.querySelectorAll('.cur-opt').forEach(o => o.classList.toggle('active', o.dataset.cur === S.dispCur));
+  };
+  curBtn.onclick = () => {
+    S.dispCur = S.dispCur === 'IDR' ? 'USD' : 'IDR';
+    localStorage.setItem('ot.dispcur', S.dispCur);
+    renderCurToggle();
+    renderAccount();
+    renderHistory();
+    patchPositions();
+    patchOrders();
+    updateMarginPreview();
+  };
+  renderCurToggle();
   // modal
   $('#tm-close').onclick = closeTicket;
   backdrop.onclick = closeTicket;

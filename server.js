@@ -40,6 +40,7 @@ const SYMBOLS = {
   'AUDUSD': { cat: 'Forex',    price: 0.65804,  digits: 5, pip: 0.0001, spread: 1.2,  dvol: 0.0068, contract: 100000, quote: 'USD', base: 'AUD', disp: 'Aussie / US Dollar' },
   'NZDUSD': { cat: 'Forex',    price: 0.61192,  digits: 5, pip: 0.0001, spread: 1.9,  dvol: 0.0070, contract: 100000, quote: 'USD', base: 'NZD', disp: 'Kiwi / US Dollar' },
   'USDCAD': { cat: 'Forex',    price: 1.35822,  digits: 5, pip: 0.0001, spread: 1.5,  dvol: 0.0044, contract: 100000, quote: 'CAD', base: 'USD', disp: 'US Dollar / Canadian' },
+  'USDIDR': { cat: 'Exotics',  price: 16245,    digits: 0, pip: 1,      spread: 30,   dvol: 0.0038, contract: 100000, quote: 'IDR', base: 'USD', disp: 'US Dollar / Rupiah' },
   'EURJPY': { cat: 'Forex',    price: 163.294,  digits: 3, pip: 0.01,   spread: 1.8,  dvol: 0.0061, contract: 100000, quote: 'JPY', base: 'EUR', disp: 'Euro / Yen' },
   'GBPJPY': { cat: 'Forex',    price: 190.842,  digits: 3, pip: 0.01,   spread: 2.6,  dvol: 0.0076, contract: 100000, quote: 'JPY', base: 'GBP', disp: 'Pound / Yen' },
   'XAUUSD': { cat: 'Metals',   price: 2385.42,  digits: 2, pip: 0.01,   spread: 30,   dvol: 0.0092, contract: 100,    quote: 'USD', base: 'XAU', disp: 'Gold / US Dollar' },
@@ -246,8 +247,8 @@ function loadAccount() {
     if (j && typeof j.balance === 'number') return j;
   } catch (e) { /* fresh */ }
   return {
-    login: 88419220, name: 'Omya Trade Markets Ltd', currency: 'USD', leverage: LEVERAGE,
-    balance: 10000.00, credit: 0,
+    login: 88419220, name: 'Omya Trade Markets Ltd', currency: 'IDR', leverage: LEVERAGE,
+    balance: 20000000.00, credit: 0,
     positions: [], orders: [], history: [],
     nextTicket: 910034571,
   };
@@ -266,6 +267,12 @@ function saveAccount() {
 
 function priceOf(sym) { const S = SYMBOLS[sym]; return { bid: S.bid, ask: S.ask }; }
 
+/* account-currency conversion (account is IDR-denominated; P/L is computed
+   in USD then converted at the live USDIDR rate - like a real IDR account) */
+function acctRate() {
+  return account.currency === 'IDR' ? (SYMBOLS['USDIDR'].mid || 16245) : 1;
+}
+
 function baseToUSD(sym, price) {
   const S = SYMBOLS[sym];
   switch (S.base) {
@@ -277,6 +284,7 @@ function baseToUSD(sym, price) {
     case 'JPY': return 1 / SYMBOLS['USDJPY'].mid;
     case 'CHF': return 1 / SYMBOLS['USDCHF'].mid;
     case 'CAD': return 1 / SYMBOLS['USDCAD'].mid;
+    case 'IDR': return 1 / (SYMBOLS['USDIDR'].mid || 16245);
     default: return price; // XAU, XAG, BTC, ETH, WBS — quoted in USD per unit
   }
 }
@@ -288,6 +296,7 @@ function quoteToUSD(sym, price) {
     case 'CHF': return 1 / SYMBOLS['USDCHF'].mid;
     case 'CAD': return 1 / SYMBOLS['USDCAD'].mid;
     case 'EUR': return SYMBOLS['EURUSD'].mid;
+    case 'IDR': return 1 / (SYMBOLS['USDIDR'].mid || 16245);
     default: return 1;
   }
 }
@@ -296,12 +305,12 @@ function positionPL(p) {
   const { bid, ask } = priceOf(p.symbol);
   const cur = p.side === 'buy' ? bid : ask;
   const diff = (cur - p.openPrice) * (p.side === 'buy' ? 1 : -1);
-  return diff * S.contract * p.volume * quoteToUSD(p.symbol, cur);
+  return diff * S.contract * p.volume * quoteToUSD(p.symbol, cur) * acctRate();
 }
 function marginOf(sym, volume, price) {
   const S = SYMBOLS[sym];
   const notional = S.contract * volume * baseToUSD(sym, price || S.mid);
-  return notional / account.leverage;
+  return notional / account.leverage * acctRate();
 }
 function usedMargin() {
   let m = 0;
@@ -377,7 +386,7 @@ function closePositionObj(p, price, reason) {
   const profit = (() => {
     const S = SYMBOLS[p.symbol];
     const diff = (price - p.openPrice) * (p.side === 'buy' ? 1 : -1);
-    return diff * S.contract * p.volume * quoteToUSD(p.symbol, price);
+    return diff * S.contract * p.volume * quoteToUSD(p.symbol, price) * acctRate();
   })();
   account.balance += profit;
   account.positions = account.positions.filter(x => x.ticket !== p.ticket);
@@ -545,7 +554,7 @@ async function handleAPI(req, res, url) {
       // partial close
       const price = p.side === 'buy' ? bid : ask;
       const diff = (price - p.openPrice) * (p.side === 'buy' ? 1 : -1);
-      const profit = diff * S.contract * volume * quoteToUSD(p.symbol, price);
+      const profit = diff * S.contract * volume * quoteToUSD(p.symbol, price) * acctRate();
       account.balance += profit;
       p.volume = r(p.volume - volume, 2);
       account.history.unshift({

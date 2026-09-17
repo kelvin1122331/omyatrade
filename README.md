@@ -15,11 +15,14 @@ Tanpa `npm install` — tidak ada dependency eksternal.
 
 ## Fitur
 
-- **Live feed** — tick every 280ms via SSE, 18 simbol (forex, metals, energi, indeks, crypto), spread dinamis & regime volatilitas
+- **Live feed** — tick every 280ms via SSE, 19 simbol (forex, metals, energi, indeks, crypto & **USDIDR**), spread dinamis & regime volatilitas
+- **Akun Rupiah** — saldo **Rp 20.000.000**, leverage 1:100; seluruh P/L, margin, dan riwayat terdenominasi IDR (konversi otomatis dari USD di kurs USDIDR live)
+- **Toggle tampilan Rp / $** — klik tombol `Rp/$` di top bar untuk mengganti mata uang tampilan (kurs live)
+- **Sparkline naik-turun** — mini-chart per simbol di Market Watch yang bergerak realtime
 - **Chart engine custom** (canvas) — candlestick / hollow / line / area, volume tick, crosshair OHLC, zoom scroll & pinch, drag pan, countdown candle, overlay posisi (entry, SL, TP, pending order)
 - **7 timeframe** — M1, M5, M15, M30, H1, H4, D1; riwayat sintetis berlapis (D1 → H1 → M1) yang konsisten lintas timeframe, ~16 bulan untuk D1
 - **Eksekusi trading** — market order dengan slippage realistis, pending order (buy/sell limit & stop), modifikasi & partial close, one-click trading
-- **Akun margin** — leverage 1:100, kalkulasi margin & P/L multi-mata-uang, margin level, **stop-out otomatis di 20%** (dieksekusi server-side meski browser tertutup)
+- **Akun margin** — margin & P/L multi-mata-uang, margin level, **stop-out otomatis di 20%** (dieksekusi server-side meski browser tertutup)
 - **Panel MT5-style** — Market Watch bergrup + flash harga, Market Depth, Toolbox (Trade / Orders / History), ticket order lengkap
 - **Persistence** — status akun disimpan ke `data/account.json`
 - **Responsif** — layout desktop penuh, tampilan mobile dengan bottom-nav (Quotes / Chart / Trade / History)
