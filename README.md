@@ -11,6 +11,13 @@ Web trading terminal bergaya MetaTrader 5 — brand **OMYA TRADE**. Realtime mar
 | `trader` | `trader123` | Terminal trading (saldo Rp 20.000.000) |
 | `admin` | `admin123` | Terminal trading + **Market Control** |
 
+> Password default hanya untuk pengembangan. Untuk produksi set env `OMYA_ADMIN_PASS` dan `OMYA_TRADER_PASS`
+> (server menampilkan peringatan saat boot jika password default masih dipakai).
+>
+> **Hardening login:** password di-hash scrypt + perbandingan constant-time, rate-limit per IP (20/15 mnt) dan
+> per akun (5 gagal → kunci 15 mnt), token sesi disimpan sebagai SHA-256 (file `0600`), idle-timeout 7 hari,
+> token via query-string hanya diterima untuk SSE, POST lintas-origin ditolak, header keamanan dasar.
+
 **Market Control (rahasia):** klik logo OMYA TRADE **3×** di top bar. Khusus sesi admin — isi:
 - **Treasury** — menambah/mengurangi saldo akun secara live
 - **AutoPlay Bot (Flow Reader)** — bot yang "membaca arah grafik": membuka posisi sendiri dan selalu menang; saat aktif muncul **Control Orb** (tombol bulat emas yang bisa digeser) berisi semua cheat
