@@ -48,10 +48,9 @@ async function api(path, body) {
     headers,
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401 && !path.startsWith('/api/auth/')) {
-    clearAuth();
-    showLogin();
-    throw new Error('Session expired');
+  if (res.status === 401 && path !== '/api/auth/login') {
+    if (!path.startsWith('/api/auth/')) { clearAuth(); showLogin(); }
+    throw new Error(res.status === 401 ? 'Session expired' : 'Request failed');
   }
   const j = await res.json().catch(() => ({}));
   if (!res.ok || j.error) throw new Error(j.error || 'Request failed');
@@ -167,12 +166,12 @@ function showLogin() {
 /* ============================================================
    FEED
    ============================================================ */
-let es = null, esTimer = null;
+let es = null, esTimer = null, esFails = 0;
 function connectFeed() {
   es = new EventSource('/api/stream?token=' + encodeURIComponent(getToken() || ''));
   es.addEventListener('tick', e => {
     const { t, ticks } = JSON.parse(e.data);
-    if (!S.connected) setConn(true);
+    if (!S.connected) { setConn(true); esFails = 0; }
     for (const tk of ticks) {
       const prev = S.prices[tk.s];
       S.prices[tk.s] = { b: tk.b, a: tk.a };
@@ -207,6 +206,7 @@ function connectFeed() {
   es.onopen = () => { if (!S.connected) setConn(true); };
   es.onerror = () => {
     setConn(false);
+    if (++esFails >= 8) { esFails = 0; clearAuth(); location.reload(); return; }
     clearTimeout(esTimer);
     esTimer = setTimeout(() => { try { es.close(); } catch (x) {} connectFeed(); }, 2500);
   };
@@ -1155,6 +1155,7 @@ function saveLots(v) { S.lots = v; localStorage.setItem('ot.lots', v); $('#tm-vo
 /* ============================================================
    BOOT
    ============================================================ */
+let bootFails = 0;
 async function boot() {
   // default view for small screens
   if (window.innerWidth <= 860 && !document.body.dataset.view) document.body.dataset.view = 'chart';
@@ -1163,9 +1164,18 @@ async function boot() {
   if (!getToken()) { bootAway(); return showLogin(); }
   try {
     S.user = await api('/api/auth/check');
-  } catch (e) { return; }
+  } catch (e) {
+    // stale/invalid token (e.g. server restarted): back to login, never freeze
+    clearAuth();
+    bootAway();
+    showLogin();
+    toast('err', 'Session expired', 'Please sign in again.');
+    return;
+  }
   try {
     const j = await api('/api/bootstrap');
+    if (!j || !Array.isArray(j.symbols) || !j.account) throw new Error('Invalid server response');
+    bootFails = 0;
     for (const sp of j.symbols) S.symbols[sp.symbol] = sp;
     S.symList = j.symbols.map(s => s.symbol);
     S.account = j.account;
@@ -1198,12 +1208,30 @@ async function boot() {
     setTimeout(() => $('#boot')?.remove(), 900);
   } catch (e) {
     console.error('[boot] failed:', e);
+    if (++bootFails >= 3) {
+      bootFails = 0;
+      clearAuth();
+      bootAway();
+      showLogin();
+      toast('err', 'Connection problem', 'Market data could not be loaded. Please sign in again.');
+      return;
+    }
     if ($('#boot-msg')) $('#boot-msg').textContent = 'Connection failed — retrying…';
-    if (getToken()) setTimeout(boot, 2200);
+    setTimeout(boot, 2200);
   }
 }
 function bootAway() {
   const b = $('#boot');
   if (b) { b.classList.add('done'); setTimeout(() => b.remove(), 650); }
 }
+// watchdog: if the boot screen is still alive after 30s, force the login page
+setTimeout(() => {
+  const b = document.getElementById('boot');
+  if (b && !b.classList.contains('done') && document.getElementById('app').classList.contains('hidden')) {
+    clearAuth();
+    b.classList.add('done');
+    setTimeout(() => b.remove(), 650);
+    showLogin();
+  }
+}, 30000);
 boot();

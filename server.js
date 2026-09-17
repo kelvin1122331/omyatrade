@@ -30,15 +30,38 @@ const USERS = {
   admin:  { pass: 'admin123',  role: 'admin',  name: 'Administrator' },
   trader: { pass: 'trader123', role: 'trader', name: 'Trader' },
 };
+const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
+const SESSION_TTL = 30 * 24 * 3600 * 1000; // 30 days
 const sessions = new Map(); // token -> {user, role, name, loginAt}
+function loadSessions() {
+  try {
+    const j = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+    const now = Date.now();
+    for (const [k, v] of Object.entries(j)) {
+      if (v && v.loginAt && now - v.loginAt < SESSION_TTL) sessions.set(k, v);
+    }
+    if (sessions.size) console.log(`[omya] restored ${sessions.size} session(s)`);
+  } catch (e) { /* fresh */ }
+}
+let sessSaveT = null;
+function saveSessions() {
+  clearTimeout(sessSaveT);
+  sessSaveT = setTimeout(() => {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(SESSIONS_FILE, JSON.stringify(Object.fromEntries(sessions)));
+    } catch (e) { console.error('session persist failed', e.message); }
+  }, 400);
+}
 function makeToken() { return crypto.randomBytes(24).toString('hex'); }
 function sessionOf(req, url) {
   let tok = null;
   const h = req.headers['authorization'];
   if (h && h.startsWith('Bearer ')) tok = h.slice(7).trim();
   if (!tok) tok = url.searchParams.get('token');
-  if (!tok || !sessions.has(tok)) return null;
-  return Object.assign({ token: tok }, sessions.get(tok));
+  const s = tok && sessions.get(tok);
+  if (!s || Date.now() - s.loginAt > SESSION_TTL) { if (tok) sessions.delete(tok); return null; }
+  return Object.assign({ token: tok }, s);
 }
 
 /* ---------------- Cheat engine (admin) ---------------- */
@@ -589,6 +612,7 @@ async function handleAPI(req, res, url) {
     if (!u || u.pass !== String(password || '')) return json(res, 401, { error: 'Invalid account or password' });
     const tok = makeToken();
     sessions.set(tok, { user: String(username).toLowerCase(), role: u.role, name: u.name, loginAt: Date.now() });
+    saveSessions();
     return json(res, 200, { ok: true, token: tok, role: u.role, name: u.name, login: account.login, server: SERVER_NAME });
   }
 
@@ -600,6 +624,7 @@ async function handleAPI(req, res, url) {
   if (!sess) return json(res, 401, { error: 'Unauthorized' });
   if (p === '/api/auth/logout' && req.method === 'POST') {
     sessions.delete(sess.token);
+    saveSessions();
     return json(res, 200, { ok: true });
   }
 
@@ -846,6 +871,8 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, HOST, () => console.log(`[omya] ${SERVER_NAME} listening on http://${HOST}:${PORT}`));
 
 /* ---------------- Boot ---------------- */
+fs.mkdirSync(DATA_DIR, { recursive: true });
+loadSessions();
 genHistory();
 // seed live prices so the very first snapshot is consistent
 doTick();
