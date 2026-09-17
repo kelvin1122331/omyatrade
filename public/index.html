@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0c10">
+<title>Omya Trade — Trading Terminal</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f5d47a'/%3E%3Cstop offset='1' stop-color='%23b8860b'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='%230a0c10'/%3E%3Cpath d='M32 12 L50 32 L32 52 L14 32 Z' fill='none' stroke='url(%23g)' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='6' fill='url(%23g)'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<!-- ============ BOOT / CONNECT SCREEN ============ -->
+<div id="boot">
+  <div class="boot-glow"></div>
+  <div class="boot-inner">
+    <div class="boot-logo">
+      <svg viewBox="0 0 120 120" class="boot-mark" aria-hidden="true">
+        <defs>
+          <linearGradient id="goldGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#f7e08b"/><stop offset=".45" stop-color="#d4af37"/><stop offset="1" stop-color="#8a6a1f"/>
+          </linearGradient>
+        </defs>
+        <path class="mark-draw" d="M60 14 L100 60 L60 106 L20 60 Z" fill="none" stroke="url(#goldGrad)" stroke-width="5" stroke-linejoin="round"/>
+        <path class="mark-draw mark-draw2" d="M44 66 L56 50 L66 60 L78 42" fill="none" stroke="url(#goldGrad)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle class="mark-dot" cx="60" cy="60" r="5" fill="url(#goldGrad)"/>
+      </svg>
+      <div class="boot-brand">OMYA<span>TRADE</span></div>
+      <div class="boot-sub">PRECISION MARKETS · EST. 2019</div>
+    </div>
+    <div class="boot-connect">
+      <div class="boot-status"><span class="boot-spinner"></span><span id="boot-msg">Establishing secure connection…</span></div>
+      <div class="boot-bar"><div class="boot-bar-fill" id="boot-fill"></div></div>
+      <div class="boot-srv"><span>OmyaTrade-Real03</span><span>LD4 · London</span><span id="boot-ping">— ms</span></div>
+    </div>
+  </div>
+  <div class="boot-footer">Omya Trade Markets Ltd · Authorised &amp; regulated · SFSA Licence № GB-220417</div>
+</div>
+
+<!-- ============ LOGIN ============ -->
+<div id="login" class="hidden">
+  <div class="boot-glow"></div>
+  <div class="login-card">
+    <svg viewBox="0 0 120 120" class="login-mark" aria-hidden="true">
+      <defs><linearGradient id="goldGrad3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f7e08b"/><stop offset=".45" stop-color="#d4af37"/><stop offset="1" stop-color="#8a6a1f"/></linearGradient></defs>
+      <path d="M60 14 L100 60 L60 106 L20 60 Z" fill="none" stroke="url(#goldGrad3)" stroke-width="5" stroke-linejoin="round"/>
+      <path d="M44 66 L56 50 L66 60 L78 42" fill="none" stroke="url(#goldGrad3)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="60" cy="60" r="5" fill="url(#goldGrad3)"/>
+    </svg>
+    <div class="login-brand">OMYA<span>TRADE</span></div>
+    <div class="login-sub">SECURE CLIENT TERMINAL</div>
+    <form id="login-form" autocomplete="on">
+      <div class="field">
+        <label>Account</label>
+        <input id="login-user" autocomplete="username" spellcheck="false" placeholder="Login" required>
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input id="login-pass" type="password" autocomplete="current-password" placeholder="••••••••" required>
+      </div>
+      <div id="login-err" class="login-err hidden">Invalid account or password</div>
+      <button id="login-btn" class="gold-btn big" type="submit">SIGN IN</button>
+    </form>
+    <div class="login-srv"><span class="dot"></span><span>OmyaTrade-Real03</span><span>LD4 · London</span></div>
+  </div>
+  <div class="boot-footer">Omya Trade Markets Ltd · Authorised &amp; regulated · SFSA Licence № GB-220417</div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="hidden" aria-live="polite">
+
+  <!-- Top bar -->
+  <header id="topbar">
+    <button id="btn-sidebar" class="icon-btn" title="Market Watch" aria-label="Toggle market watch">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+    </button>
+    <div class="brand">
+      <svg viewBox="0 0 64 64" class="brand-mark" aria-hidden="true">
+        <defs><linearGradient id="bg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f7e08b"/><stop offset="1" stop-color="#a97f22"/></linearGradient></defs>
+        <path d="M32 7 L53 32 L32 57 L11 32 Z" fill="none" stroke="url(#bg2)" stroke-width="4"/>
+        <circle cx="32" cy="32" r="4.5" fill="url(#bg2)"/>
+      </svg>
+      <div class="brand-text">OMYA<b>TRADE</b></div>
+    </div>
+
+    <div class="srv-chip" id="srv-chip">
+      <span class="dot" id="srv-dot"></span>
+      <span class="srv-name">OmyaTrade-Real03</span>
+      <span class="srv-ping" id="srv-ping">— ms</span>
+    </div>
+
+    <div class="top-spacer"></div>
+
+    <div class="acct-chip" id="acct-chip">
+      <div class="acct-id"><span class="acct-no" id="acct-no">№ 88419220</span><span class="acct-leverage" id="acct-lev">1:100</span></div>
+      <div class="acct-nums">
+        <div class="acct-num"><label>Balance</label><b id="acct-balance">—</b></div>
+        <div class="acct-num"><label>Equity</label><b id="acct-equity">—</b></div>
+        <div class="acct-num"><label>Floating P/L</label><b id="acct-floating">—</b></div>
+      </div>
+    </div>
+
+    <button id="btn-logout" class="icon-btn" title="Log out" aria-label="Log out">
+      <svg viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11" stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button id="btn-clock" class="icon-btn clock" title="Server time"><span id="clock">00:00:00</span></button>
+    <button id="btn-currency" class="icon-btn cur-toggle" title="Display currency" aria-label="Toggle display currency">
+      <span class="cur-opt" data-cur="IDR">Rp</span><span class="cur-div">/</span><span class="cur-opt" data-cur="USD">$</span>
+    </button>
+    <button id="btn-sound" class="icon-btn" title="Sounds" aria-label="Toggle sound">
+      <svg class="snd-on" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
+      <svg class="snd-off" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16 9.5l5 5M21 9.5l-5 5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>
+    </button>
+  </header>
+
+  <!-- Main -->
+  <div id="main">
+    <!-- Sidebar : Market Watch + Depth -->
+    <aside id="sidebar">
+      <div class="panel-head">
+        <span>Market Watch</span>
+        <span class="head-meta" id="mw-count">— symbols</span>
+      </div>
+      <input id="mw-search" type="text" placeholder="Search symbol…" autocomplete="off" spellcheck="false">
+      <div id="mw-groups"></div>
+
+      <div class="panel-head depth-head"><span>Market Depth</span><span class="head-meta" id="depth-sym">—</span></div>
+      <div id="depth"></div>
+    </aside>
+
+    <!-- Center : chart -->
+    <section id="center">
+      <div id="chart-toolbar">
+        <button id="chart-symbol" class="sym-title">
+          <b id="chart-sym-code">—</b>
+          <span class="sym-live" id="chart-sym-price">—</span>
+          <span class="sym-change" id="chart-sym-change">—</span>
+        </button>
+        <div class="tf-group" id="tf-group"></div>
+        <div class="chart-sep"></div>
+        <div class="ctype-group" id="ctype-group">
+          <button data-ctype="candles" class="active" title="Candlesticks"><svg viewBox="0 0 24 24"><path d="M7 5v3M7 16v3M17 4v3M17 14v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><rect x="5" y="8" width="4" height="8" rx="1" fill="currentColor"/><rect x="15" y="7" width="4" height="7" rx="1" fill="currentColor"/></svg></button>
+          <button data-ctype="hollow" title="Hollow candles"><svg viewBox="0 0 24 24"><rect x="5" y="8" width="4" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="15" y="7" width="4" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7 5v3M7 16v3M17 4v3M17 14v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+          <button data-ctype="line" title="Line"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 5-8 4 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button data-ctype="area" title="Area"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 5-8 4 5V21H3z" fill="currentColor" opacity=".35"/><path d="M3 17l5-6 4 3 5-8 4 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </div>
+        <div class="chart-sep"></div>
+        <button id="btn-volume" class="tool-toggle active" title="Tick volume">Volume</button>
+        <div class="top-spacer"></div>
+        <label class="oct-toggle" title="One-click trading">
+          <input type="checkbox" id="oct-check" checked><span>One-Click Trading</span>
+        </label>
+        <button id="btn-new-order" class="gold-btn">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+          <span>New Order</span>
+        </button>
+      </div>
+
+      <div id="chart-wrap">
+        <canvas id="chart"></canvas>
+        <div id="ohlc-legend"></div>
+        <div id="oneclick" class="oct-visible">
+          <button id="oc-sell" class="oc-btn oc-sell"><span class="oc-lab">SELL</span><span class="oc-price" id="oc-sell-price">—</span></button>
+          <div class="oc-vol">
+            <button id="oc-minus" aria-label="Decrease">−</button>
+            <input id="oc-lots" inputmode="decimal" value="0.10">
+            <button id="oc-plus" aria-label="Increase">+</button>
+          </div>
+          <button id="oc-buy" class="oc-btn oc-buy"><span class="oc-lab">BUY</span><span class="oc-price" id="oc-buy-price">—</span></button>
+        </div>
+        <div id="conn-badge"><span class="dot"></span>LIVE</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Toolbox (bottom) -->
+  <footer id="toolbox">
+    <div id="tb-head">
+      <div class="tb-tabs" id="tb-tabs">
+        <button class="tb-tab active" data-tab="positions">Trade<span class="tb-badge" id="badge-positions">0</span></button>
+        <button class="tb-tab" data-tab="orders">Orders<span class="tb-badge" id="badge-orders">0</span></button>
+        <button class="tb-tab" data-tab="history">History</button>
+      </div>
+      <div class="tb-summary" id="tb-summary">
+        <div><label>Balance</label><b id="sum-balance">—</b></div>
+        <div><label>Equity</label><b id="sum-equity">—</b></div>
+        <div><label>Margin</label><b id="sum-margin">—</b></div>
+        <div><label>Free Margin</label><b id="sum-free">—</b></div>
+        <div><label>Margin Level</label><b id="sum-level">—</b></div>
+        <div><label>Floating P/L</label><b id="sum-floating">—</b></div>
+      </div>
+      <button id="tb-closeall" class="ghost-danger hidden">Close All Positions</button>
+    </div>
+
+    <div id="tb-body">
+      <div class="tb-pane active" data-pane="positions">
+        <div class="tb-scroll"><table class="tgrid" id="positions-table">
+          <thead><tr>
+            <th>Ticket</th><th>Time</th><th>Symbol</th><th>Type</th><th>Volume</th><th>Open Price</th><th>S/L</th><th>T/P</th><th>Price</th><th>Swap</th><th>Profit</th><th class="th-actions"></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+      <div class="tb-pane" data-pane="orders">
+        <div class="tb-scroll"><table class="tgrid" id="orders-table">
+          <thead><tr>
+            <th>Ticket</th><th>Placed</th><th>Symbol</th><th>Type</th><th>Volume</th><th>Price</th><th>S/L</th><th>T/P</th><th>Current</th><th class="th-actions"></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+      <div class="tb-pane" data-pane="history">
+        <div class="hist-controls">
+          <div class="range-chips" id="hist-range">
+            <button data-range="today" class="active">Today</button>
+            <button data-range="week">This Week</button>
+            <button data-range="month">This Month</button>
+            <button data-range="all">All</button>
+          </div>
+          <div class="hist-total" id="hist-total"></div>
+        </div>
+        <div class="tb-scroll"><table class="tgrid" id="history-table">
+          <thead><tr>
+            <th>Open Time</th><th>Symbol</th><th>Type</th><th>Volume</th><th>Open Price</th><th>Close Price</th><th>Result</th><th>Net P/L</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Mobile bottom nav -->
+  <nav id="mobile-nav">
+    <button data-view="quotes" ><svg viewBox="0 0 24 24"><path d="M4 19V5m5 14V9m5 10V7m5 12v-6" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg><span>Quotes</span></button>
+    <button data-view="chart" class="active"><svg viewBox="0 0 24 24"><path d="M3 13l4.5-5 3.5 3L16 5l5 6" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 20h18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span>Chart</span></button>
+    <button data-view="trade"><svg viewBox="0 0 24 24"><path d="M7 14l4-4 3 3 5-6" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 4h7M4 4v7" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Trade</span></button>
+    <button data-view="history"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 7.5V12l3 2.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg><span>History</span></button>
+  </nav>
+</div>
+
+<!-- ============ ORDER TICKET MODAL ============ -->
+<div id="modal-backdrop" class="hidden"></div>
+<div id="ticket-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-head">
+    <div>
+      <div class="tm-sym" id="tm-symbol">EURUSD</div>
+      <div class="tm-sub" id="tm-symname">Euro / US Dollar</div>
+    </div>
+    <div class="tm-prices">
+      <div class="tm-price sell"><label>Bid</label><b id="tm-bid">—</b></div>
+      <div class="tm-spr" id="tm-spread">—</div>
+      <div class="tm-price buy"><label>Ask</label><b id="tm-ask">—</b></div>
+    </div>
+    <button class="icon-btn modal-x" id="tm-close" aria-label="Close">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+
+  <div class="tm-tabs" id="tm-tabs">
+    <button class="active" data-tt="market">Market</button>
+    <button data-tt="pending">Pending</button>
+    <button data-tt="modify" id="tm-tab-modify" class="hidden">Modify</button>
+  </div>
+
+  <div class="tm-body">
+    <!-- MARKET -->
+    <div class="tm-pane active" data-tp="market">
+      <div class="tm-row2">
+        <div class="field">
+          <label>Volume (lots)</label>
+          <div class="stepper">
+            <button data-step="-1">−</button>
+            <input id="tm-volume" inputmode="decimal" value="0.10">
+            <button data-step="1">+</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Margin required</label>
+          <div class="static-val" id="tm-margin">—</div>
+        </div>
+      </div>
+      <div class="tm-row2">
+        <div class="field">
+          <label class="chk"><input type="checkbox" id="tm-sl-on"><span>Stop Loss</span></label>
+          <div class="stepper slim"><input id="tm-sl" inputmode="decimal" placeholder="—" disabled></div>
+        </div>
+        <div class="field">
+          <label class="chk"><input type="checkbox" id="tm-tp-on"><span>Take Profit</span></label>
+          <div class="stepper slim"><input id="tm-tp" inputmode="decimal" placeholder="—" disabled></div>
+        </div>
+      </div>
+      <div class="tm-exec" id="tm-exec-buttons">
+        <button id="tm-sell" class="exec-btn sell"><span>SELL<br><b id="tm-sell-price">—</b></span></button>
+        <button id="tm-buy" class="exec-btn buy"><span>BUY<br><b id="tm-buy-price">—</b></span></button>
+      </div>
+    </div>
+
+    <!-- PENDING -->
+    <div class="tm-pane" data-tp="pending">
+      <div class="tm-row2">
+        <div class="field">
+          <label>Type</label>
+          <div class="select-wrap"><select id="tm-ptype">
+            <option value="buy limit">Buy Limit</option>
+            <option value="sell limit">Sell Limit</option>
+            <option value="buy stop">Buy Stop</option>
+            <option value="sell stop">Sell Stop</option>
+          </select></div>
+        </div>
+        <div class="field">
+          <label>Volume (lots)</label>
+          <div class="stepper">
+            <button data-step="-1">−</button>
+            <input id="tm-pvolume" inputmode="decimal" value="0.10">
+            <button data-step="1">+</button>
+          </div>
+        </div>
+      </div>
+      <div class="tm-row2">
+        <div class="field">
+          <label>Price</label>
+          <div class="stepper slim"><input id="tm-pprice" inputmode="decimal"></div>
+        </div>
+        <div class="field hint-field"><span class="hint" id="tm-phint">Set a price below the current Ask.</span></div>
+      </div>
+      <div class="tm-row2">
+        <div class="field">
+          <label class="chk"><input type="checkbox" id="tm-psl-on"><span>Stop Loss</span></label>
+          <div class="stepper slim"><input id="tm-psl" inputmode="decimal" placeholder="—" disabled></div>
+        </div>
+        <div class="field">
+          <label class="chk"><input type="checkbox" id="tm-ptp-on"><span>Take Profit</span></label>
+          <div class="stepper slim"><input id="tm-ptp" inputmode="decimal" placeholder="—" disabled></div>
+        </div>
+      </div>
+      <button id="tm-place" class="exec-btn single gold">Place Pending Order</button>
+    </div>
+
+    <!-- MODIFY -->
+    <div class="tm-pane" data-tp="modify">
+      <div class="tm-mod-info" id="tm-mod-info"></div>
+      <div class="tm-row2">
+        <div class="field">
+          <label>Stop Loss</label>
+          <div class="stepper slim"><input id="tm-msl" inputmode="decimal" placeholder="none"></div>
+        </div>
+        <div class="field">
+          <label>Take Profit</label>
+          <div class="stepper slim"><input id="tm-mtp" inputmode="decimal" placeholder="none"></div>
+        </div>
+      </div>
+      <div class="tm-row2">
+        <div class="field">
+          <label>Partial close (lots)</label>
+          <div class="stepper slim"><input id="tm-mvol" inputmode="decimal" placeholder="all"></div>
+        </div>
+        <div class="field">
+          <label>Current P/L</label>
+          <div class="static-val" id="tm-mpl">—</div>
+        </div>
+      </div>
+      <div class="tm-row2">
+        <button id="tm-save-mod" class="exec-btn neutral">Modify</button>
+        <button id="tm-close-pos" class="exec-btn sell">Close Position</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ADMIN CONTROL (logo ×3) ============ -->
+<div id="admin-page" class="hidden">
+  <div class="admin-card">
+    <div class="admin-head">
+      <div>
+        <div class="admin-title">Market Control</div>
+        <div class="admin-sub">Authorized personnel only · OmyaTrade-Real03</div>
+      </div>
+      <button class="icon-btn" id="admin-close" aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <div id="admin-login-view" class="hidden">
+      <form id="admin-login-form" class="admin-login">
+        <div class="field"><label>Administrator</label><input id="admin-user" autocomplete="off" spellcheck="false" placeholder="admin"></div>
+        <div class="field"><label>Password</label><input id="admin-pass" type="password" autocomplete="off" placeholder="••••••••"></div>
+        <div id="admin-err" class="login-err hidden">Invalid administrator credentials</div>
+        <button class="gold-btn big" type="submit">AUTHORIZE</button>
+      </form>
+    </div>
+
+    <div id="admin-dash" class="hidden">
+      <!-- Treasury -->
+      <section class="adm-sec">
+        <div class="adm-sec-head">
+          <span class="adm-sec-title">Treasury</span>
+          <span class="adm-sec-badge">LIVE ACCOUNT</span>
+        </div>
+        <div class="adm-balance-row">
+          <div class="adm-balance"><label>Balance</label><b id="adm-balance">—</b></div>
+          <div class="adm-funds">
+            <div class="stepper slim"><input id="adm-amount" inputmode="numeric" placeholder="Amount (+/-)"></div>
+            <div class="adm-chips">
+              <button class="adm-chip" data-amt="1000000">+1 Jt</button>
+              <button class="adm-chip" data-amt="10000000">+10 Jt</button>
+              <button class="adm-chip" data-amt="100000000">+100 Jt</button>
+              <button class="adm-chip neg" data-amt="-1000000">−1 Jt</button>
+            </div>
+            <button id="adm-apply" class="gold-btn">Apply</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Autoplay bot -->
+      <section class="adm-sec">
+        <div class="adm-sec-head">
+          <span class="adm-sec-title">AutoPlay Bot · Flow Reader</span>
+          <label class="oct-toggle"><input type="checkbox" id="adm-bot-toggle"><span>Engage</span></label>
+        </div>
+        <div class="adm-bot-row">
+          <div class="adm-kv"><label>Symbol</label><b id="adm-bot-symbol">—</b></div>
+          <div class="adm-kv"><label>Lots</label><div class="stepper slim"><input id="adm-bot-lots" inputmode="decimal" value="0.10"></div></div>
+          <div class="adm-kv"><label>Opened</label><b id="adm-opened">0</b></div>
+          <div class="adm-kv"><label>Wins</label><b id="adm-wins">0</b></div>
+          <div class="adm-kv"><label>Bot P/L</label><b id="adm-pl">—</b></div>
+        </div>
+        <div class="adm-status" id="adm-bot-status">Standby.</div>
+      </section>
+
+      <!-- Directional cheat -->
+      <section class="adm-sec">
+        <div class="adm-sec-head">
+          <span class="adm-sec-title">Chart Flow Control</span>
+          <span class="adm-sec-badge" id="adm-cheat-symbol">—</span>
+        </div>
+        <div class="adm-seg" id="adm-cheat">
+          <button data-mode="buy" class="seg-buy">BUY · Ride Up</button>
+          <button data-mode="sell" class="seg-sell">SELL · Ride Down</button>
+          <button data-mode="off" class="seg-off active">OFF</button>
+        </div>
+        <div class="adm-status" id="adm-cheat-status">Idle — natural market flow.</div>
+      </section>
+
+      <div class="adm-foot">Session · <b id="adm-who">—</b> · changes apply to the live market feed instantly</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ FLOATING CONTROL ORB ============ -->
+<div id="cheat-orb" class="hidden">
+  <div id="orb-panel" class="hidden">
+    <div class="orb-title">Control Orb</div>
+    <div class="orb-row">
+      <span>AutoPlay Bot</span>
+      <label class="oct-toggle"><input type="checkbox" id="orb-bot"><span>On</span></label>
+    </div>
+    <div class="orb-stats" id="orb-botstats">—</div>
+    <div class="orb-seg" id="orb-cheat">
+      <button data-mode="buy" title="Chart rides up">BUY ↑</button>
+      <button data-mode="sell" title="Chart rides down">SELL ↓</button>
+      <button data-mode="off" class="active">OFF</button>
+    </div>
+    <div class="orb-status" id="orb-status">Idle</div>
+    <button id="orb-open-admin" class="orb-link">Open Control Panel</button>
+  </div>
+  <button id="orb-btn" aria-label="Control orb">
+    <svg viewBox="0 0 64 64"><path d="M32 7 L53 32 L32 57 L11 32 Z" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="32" cy="32" r="4.5" fill="currentColor"/></svg>
+  </button>
+</div>
+
+<div id="toasts"></div>
+<button id="fab-order" aria-label="New order">
+  <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
+</button>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
