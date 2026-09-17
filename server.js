@@ -25,6 +25,96 @@ const SERVER_NAME = 'OmyaTrade-Real03';
 const DATA_DIR = path.join(__dirname, 'data');
 const ACCOUNT_FILE = path.join(DATA_DIR, 'account.json');
 
+/* ---------------- Authentication ---------------- */
+const USERS = {
+  admin:  { pass: 'admin123',  role: 'admin',  name: 'Administrator' },
+  trader: { pass: 'trader123', role: 'trader', name: 'Trader' },
+};
+const sessions = new Map(); // token -> {user, role, name, loginAt}
+function makeToken() { return crypto.randomBytes(24).toString('hex'); }
+function sessionOf(req, url) {
+  let tok = null;
+  const h = req.headers['authorization'];
+  if (h && h.startsWith('Bearer ')) tok = h.slice(7).trim();
+  if (!tok) tok = url.searchParams.get('token');
+  if (!tok || !sessions.has(tok)) return null;
+  return Object.assign({ token: tok }, sessions.get(tok));
+}
+
+/* ---------------- Cheat engine (admin) ---------------- */
+const CHEAT_RUN_MS = 20000;   // slow run in the cheat direction
+const CHEAT_DIP_MS = 5000;    // brief counter-move
+const cheat = { symbol: null, mode: null, source: null, phase: 'run', phaseStart: 0 };
+const bot = { enabled: false, symbol: 'EURUSD', lots: 0.10, ticket: null, side: null,
+              opened: 0, wins: 0, pl: 0, openedAt: 0, cooldownUntil: 0, nextSide: 'buy' };
+
+function cheatActiveFor(sym) { return cheat.symbol === sym && !!cheat.mode; }
+function adminState() {
+  const now = Date.now();
+  return {
+    bot: {
+      enabled: bot.enabled, symbol: bot.symbol, lots: bot.lots,
+      opened: bot.opened, wins: bot.wins, pl: r(bot.pl, 2),
+      hasPosition: !!bot.ticket, side: bot.side, ticket: bot.ticket,
+    },
+    cheat: {
+      symbol: cheat.symbol, mode: cheat.mode, source: cheat.source, phase: cheat.phase,
+      msLeft: cheat.mode ? (cheat.phase === 'run' ? CHEAT_RUN_MS - (now - cheat.phaseStart) : CHEAT_DIP_MS - (now - cheat.phaseStart)) : 0,
+    },
+    balance: account.balance,
+  };
+}
+function broadcastAdmin() {
+  broadcast({ event: 'admin', data: adminState() });
+}
+function setManualCheat(mode, sym) {
+  if (mode === 'off' || !mode) {
+    if (cheat.source === 'manual') { cheat.symbol = null; cheat.mode = null; cheat.source = null; }
+  } else {
+    cheat.symbol = sym; cheat.mode = mode; cheat.source = 'manual';
+    cheat.phase = 'run'; cheat.phaseStart = Date.now();
+  }
+  broadcastAdmin();
+}
+function botStep() {
+  if (!bot.enabled) return;
+  const now = Date.now();
+  if (bot.ticket) {
+    const still = account.positions.some(x => x.ticket === bot.ticket);
+    if (!still) {
+      const deal = account.history.find(h => h.positionTicket === bot.ticket);
+      if (deal) { bot.pl += deal.profit; if (deal.profit > 0) bot.wins++; }
+      bot.ticket = null; bot.side = null;
+      bot.cooldownUntil = now + 1200;
+      if (cheat.source === 'bot') { cheat.symbol = null; cheat.mode = null; cheat.source = null; }
+      broadcastAdmin();
+    } else if (cheat.source !== 'manual' && now - bot.openedAt > 8000 &&
+               (cheat.symbol !== bot.symbol || cheat.mode !== bot.side)) {
+      // re-assert the flow-reading cheat behind our position
+      cheat.symbol = bot.symbol; cheat.mode = bot.side; cheat.source = 'bot';
+      cheat.phase = 'run'; cheat.phaseStart = now;
+      broadcastAdmin();
+    }
+  }
+  if (!bot.ticket && now >= bot.cooldownUntil) {
+    const S = SYMBOLS[bot.symbol];
+    if (!S) return;
+    const { ask, bid } = priceOf(bot.symbol);
+    const side = bot.nextSide;
+    bot.nextSide = rand() < 0.5 ? 'buy' : 'sell';
+    const price = side === 'buy' ? ask : bid;
+    const tp = r(price * (1 + (side === 'buy' ? 1 : -1) * 0.0015), S.digits);
+    bot.ticket = openPosition(bot.symbol, side, bot.lots, price, 0, tp, 'bot');
+    bot.side = side; bot.opened++; bot.openedAt = now;
+    if (cheat.source !== 'manual') {
+      cheat.symbol = bot.symbol; cheat.mode = side; cheat.source = 'bot';
+      cheat.phase = 'run'; cheat.phaseStart = now;
+    }
+    broadcastAccount();
+    broadcastAdmin();
+  }
+}
+
 /* ---------------- RNG helpers ---------------- */
 let _seed = 987654321;
 function srand(s) { _seed = s >>> 0; }
@@ -214,10 +304,19 @@ function doTick() {
     // regime / volatility spikes
     if (S.spike > 0) { S.spike--; if (S.spike === 0) S.volMult = 1; }
     else if (rand() < 0.0012) { S.spike = 150 + Math.floor(rand() * 900); S.volMult = 1.4 + rand() * 2.2; }
-    S.trend += -S.trend * 0.012 + randn() * 0.05;
-    if (S.trend > 1.6) S.trend = 1.6; if (S.trend < -1.6) S.trend = -1.6;
     const sg = sigmaTick(S) * S.volMult;
-    S.mid += S.trend * sg * 0.33 + sg * randn();
+    if (cheatActiveFor(name)) {
+      // forced pattern: slow run in cheat direction (20s) -> brief counter-dip (5s) -> repeat
+      const el = now - cheat.phaseStart;
+      if (cheat.phase === 'run' && el > CHEAT_RUN_MS) { cheat.phase = 'dip'; cheat.phaseStart = now; broadcastAdmin(); }
+      else if (cheat.phase === 'dip' && el > CHEAT_DIP_MS) { cheat.phase = 'run'; cheat.phaseStart = now; broadcastAdmin(); }
+      const dir = cheat.mode === 'buy' ? 1 : -1;
+      S.mid += (cheat.phase === 'run' ? dir * sg * 5.0 : -dir * sg * 6.0) + sg * 0.35 * randn();
+    } else {
+      S.trend += -S.trend * 0.012 + randn() * 0.05;
+      if (S.trend > 1.6) S.trend = 1.6; if (S.trend < -1.6) S.trend = -1.6;
+      S.mid += S.trend * sg * 0.33 + sg * randn();
+    }
 
     const half = S.spread * S.pip / 2 * (1 + 0.25 * Math.abs(randn()) * (rand() < 0.02 ? 4 : 1));
     S.bid = r(S.mid - half, S.digits);
@@ -238,6 +337,7 @@ function doTick() {
   }
   broadcast({ event: 'tick', data: { t: now, ticks } });
   engineCheck();
+  botStep();
 }
 
 /* ---------------- Account / Trading engine ---------------- */
@@ -480,7 +580,78 @@ function readBody(req) {
 
 async function handleAPI(req, res, url) {
   const p = url.pathname;
-  if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }); return res.end(); }
+  if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' }); return res.end(); }
+
+  /* ----- public: login ----- */
+  if (p === '/api/auth/login' && req.method === 'POST') {
+    const { username, password } = await readBody(req);
+    const u = USERS[String(username || '').toLowerCase()];
+    if (!u || u.pass !== String(password || '')) return json(res, 401, { error: 'Invalid account or password' });
+    const tok = makeToken();
+    sessions.set(tok, { user: String(username).toLowerCase(), role: u.role, name: u.name, loginAt: Date.now() });
+    return json(res, 200, { ok: true, token: tok, role: u.role, name: u.name, login: account.login, server: SERVER_NAME });
+  }
+
+  const sess = sessionOf(req, url);
+  if (p === '/api/auth/check') {
+    if (!sess) return json(res, 401, { error: 'Unauthorized' });
+    return json(res, 200, { ok: true, role: sess.role, name: sess.name, user: sess.user });
+  }
+  if (!sess) return json(res, 401, { error: 'Unauthorized' });
+  if (p === '/api/auth/logout' && req.method === 'POST') {
+    sessions.delete(sess.token);
+    return json(res, 200, { ok: true });
+  }
+
+  /* ----- admin ----- */
+  if (p.startsWith('/api/admin/')) {
+    if (sess.role !== 'admin') return json(res, 403, { error: 'Forbidden' });
+    if (p === '/api/admin/login' && req.method === 'POST') {
+      const { username, password } = await readBody(req);
+      const u = USERS[String(username || '').toLowerCase()];
+      if (!u || u.pass !== String(password || '') || u.role !== 'admin') return json(res, 401, { error: 'Invalid administrator credentials' });
+      sess.role = 'admin'; sessions.set(sess.token, sess);
+      return json(res, 200, { ok: true, role: 'admin' });
+    }
+    if (p === '/api/admin/state') return json(res, 200, adminState());
+    if (p === '/api/admin/deposit' && req.method === 'POST') {
+      const { amount } = await readBody(req);
+      if (typeof amount !== 'number' || isNaN(amount) || Math.abs(amount) > 1e12) return json(res, 400, { error: 'Invalid amount' });
+      account.balance = Math.max(0, r(account.balance + amount, 2));
+      broadcastAccount(); saveAccount(); broadcastAdmin();
+      return json(res, 200, { ok: true, balance: account.balance });
+    }
+    if (p === '/api/admin/cheat' && req.method === 'POST') {
+      const { mode, symbol } = await readBody(req);
+      if (mode !== 'off' && !SYMBOLS[symbol]) return json(res, 400, { error: 'Unknown symbol' });
+      setManualCheat(mode, symbol);
+      return json(res, 200, { ok: true, state: adminState().cheat });
+    }
+    if (p === '/api/admin/bot' && req.method === 'POST') {
+      const { enabled, symbol, lots } = await readBody(req);
+      if (typeof enabled !== 'boolean') return json(res, 400, { error: 'Invalid payload' });
+      if (enabled) {
+        if (!SYMBOLS[symbol]) return json(res, 400, { error: 'Unknown symbol' });
+        if (!validVolume(lots)) return json(res, 400, { error: 'Invalid volume' });
+        bot.symbol = symbol; bot.lots = lots;
+      }
+      bot.enabled = enabled;
+      if (!enabled) {
+        if (bot.ticket) {
+          const p2 = account.positions.find(x => x.ticket === bot.ticket);
+          if (p2) {
+            const { bid, ask } = priceOf(p2.symbol);
+            closePositionObj(p2, p2.side === 'buy' ? bid : ask, 'manual');
+          }
+          bot.ticket = null; bot.side = null;
+        }
+        if (cheat.source === 'bot') { cheat.symbol = null; cheat.mode = null; cheat.source = null; }
+      }
+      broadcastAccount(); saveAccount(); broadcastAdmin();
+      return json(res, 200, { ok: true, state: adminState() });
+    }
+    return json(res, 404, { error: 'Not found' });
+  }
 
   if (p === '/api/bootstrap' && req.method === 'GET') {
     return json(res, 200, {
@@ -611,7 +782,8 @@ async function handleAPI(req, res, url) {
 
 /* ---------------- SSE ---------------- */
 const sseClients = new Set();
-function sseInit(req, res) {
+function sseInit(req, res, url) {
+  if (!sessionOf(req, url)) { res.writeHead(401, { 'Content-Type': 'text/plain' }); return res.end('Unauthorized'); }
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-store',
@@ -667,7 +839,7 @@ function serveStatic(req, res, url) {
 /* ---------------- Server ---------------- */
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (url.pathname === '/api/stream') return sseInit(req, res);
+  if (url.pathname === '/api/stream') return sseInit(req, res, url);
   if (url.pathname.startsWith('/api/')) return void handleAPI(req, res, url).catch(e => { try { json(res, 500, { error: e.message }); } catch (_) {} });
   serveStatic(req, res, url);
 });

@@ -4,6 +4,18 @@ Web trading terminal bergaya MetaTrader 5 — brand **OMYA TRADE**. Realtime mar
 
 > Platform ini adalah **simulator / paper-trading** untuk keperluan belajar dan pengembangan. Seluruh harga dihasilkan oleh price-engine sintetis di server dan tidak terhubung ke pasar keuangan mana pun. Tidak ada uang riil yang dipertaruhkan.
 
+## Akun & Login
+
+| Akun | Password | Akses |
+|------|----------|-------|
+| `trader` | `trader123` | Terminal trading (saldo Rp 20.000.000) |
+| `admin` | `admin123` | Terminal trading + **Market Control** |
+
+**Market Control (rahasia):** klik logo OMYA TRADE **3×** di top bar. Khusus sesi admin — isi:
+- **Treasury** — menambah/mengurangi saldo akun secara live
+- **AutoPlay Bot (Flow Reader)** — bot yang "membaca arah grafik": membuka posisi sendiri dan selalu menang; saat aktif muncul **Control Orb** (tombol bulat emas yang bisa digeser) berisi semua cheat
+- **Chart Flow Control** — mode BUY: grafik naik perlahan 20 detik → turun singkat 5 detik → naik lagi (looping); mode SELL kebalikannya
+
 ## Menjalankan
 
 ```bash
@@ -15,6 +27,7 @@ Tanpa `npm install` — tidak ada dependency eksternal.
 
 ## Fitur
 
+- **Login & sesi** — halaman sign-in bergaya portal broker, token sesi server-side, tombol logout
 - **Live feed** — tick every 280ms via SSE, 19 simbol (forex, metals, energi, indeks, crypto & **USDIDR**), spread dinamis & regime volatilitas
 - **Akun Rupiah** — saldo **Rp 20.000.000**, leverage 1:100; seluruh P/L, margin, dan riwayat terdenominasi IDR (konversi otomatis dari USD di kurs USDIDR live)
 - **Toggle tampilan Rp / $** — klik tombol `Rp/$` di top bar untuk mengganti mata uang tampilan (kurs live)

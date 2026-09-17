@@ -5,6 +5,7 @@
 'use strict';
 
 import { CandleChart } from './chart.js';
+import { initAdmin, refresh as refreshAdmin } from './admin.js';
 
 /* ---------------- helpers ---------------- */
 const $ = s => document.querySelector(s);
@@ -36,10 +37,22 @@ function fmtDT(t) {
   const d = new Date(t);
   return `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())} ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`;
 }
+const getToken = () => localStorage.getItem('ot.token');
+function clearAuth() { localStorage.removeItem('ot.token'); localStorage.removeItem('ot.user'); }
 async function api(path, body) {
-  const res = await fetch(path, body ? {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  } : undefined);
+  const headers = { 'Content-Type': 'application/json' };
+  const tok = getToken();
+  if (tok) headers['Authorization'] = 'Bearer ' + tok;
+  const res = await fetch(path, {
+    method: body ? 'POST' : 'GET',
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 401 && !path.startsWith('/api/auth/')) {
+    clearAuth();
+    showLogin();
+    throw new Error('Session expired');
+  }
   const j = await res.json().catch(() => ({}));
   if (!res.ok || j.error) throw new Error(j.error || 'Request failed');
   return j;
@@ -139,12 +152,24 @@ function baseToUSD(sym) {
 }
 const marginReq = (sym, lots) => spec(sym).contract * lots * baseToUSD(sym) / (S.account?.leverage || 100);
 
+function showLogin() {
+  $('#app').classList.add('hidden');
+  const b = $('#boot');
+  if (b) { b.classList.add('done'); setTimeout(() => b.remove(), 600); }
+  $('#login').classList.remove('hidden');
+  $('#login-btn').disabled = false;
+  clearTimeout(esTimer);
+  try { es && es.close(); } catch (e) {}
+  es = null;
+  S.connected = false;
+}
+
 /* ============================================================
    FEED
    ============================================================ */
 let es = null, esTimer = null;
 function connectFeed() {
-  es = new EventSource('/api/stream');
+  es = new EventSource('/api/stream?token=' + encodeURIComponent(getToken() || ''));
   es.addEventListener('tick', e => {
     const { t, ticks } = JSON.parse(e.data);
     if (!S.connected) setConn(true);
@@ -178,6 +203,7 @@ function connectFeed() {
     }
   });
   es.addEventListener('deal', e => onDeal(JSON.parse(e.data)));
+  es.addEventListener('admin', () => { try { refreshAdmin(); } catch (x) {} });
   es.onopen = () => { if (!S.connected) setConn(true); };
   es.onerror = () => {
     setConn(false);
@@ -906,6 +932,8 @@ function volInput(input) {
    WIRING
    ============================================================ */
 function wire() {
+  if (wire._done) return;
+  wire._done = true;
   // toolbar tf
   const tg = $('#tf-group');
   for (const tf of TFS_LIST) {
@@ -960,6 +988,43 @@ function wire() {
   $('#oc-buy').onclick = () => placeMarket('buy', parseFloat(S.lots));
   // new order
   $('#btn-new-order').onclick = () => openTicket();
+  // --- auth ---
+  $('#login-form').onsubmit = async e => {
+    e.preventDefault();
+    const btn = $('#login-btn');
+    btn.disabled = true; btn.textContent = 'CONNECTING…';
+    $('#login-err').classList.add('hidden');
+    try {
+      const r = await fetch('/api/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: $('#login-user').value.trim(), password: $('#login-pass').value }),
+      });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || 'Login failed');
+      localStorage.setItem('ot.token', j.token);
+      localStorage.setItem('ot.user', j.name);
+      btn.disabled = false; btn.textContent = 'SIGN IN';
+      $('#login').classList.add('hidden');
+      boot();
+    } catch (err) {
+      $('#login-err').textContent = err.message;
+      $('#login-err').classList.remove('hidden');
+      btn.disabled = false; btn.textContent = 'SIGN IN';
+    }
+  };
+  $('#btn-logout').onclick = async () => {
+    try { await api('/api/auth/logout', {}); } catch (e) {}
+    clearAuth();
+    location.reload();
+  };
+  // --- secret: 3 clicks on the brand opens Market Control ---
+  let brandHits = 0, brandTimer = null;
+  document.querySelector('.brand').addEventListener('click', () => {
+    brandHits++;
+    clearTimeout(brandTimer);
+    brandTimer = setTimeout(() => { brandHits = 0; }, 900);
+    if (brandHits >= 3) { brandHits = 0; window.__tryOpenAdmin?.(); }
+  });
   const fab = $('#fab-order');
   if (fab) fab.onclick = () => openTicket();
   // currency display toggle (IDR / USD)
@@ -1095,14 +1160,18 @@ async function boot() {
   if (window.innerWidth <= 860 && !document.body.dataset.view) document.body.dataset.view = 'chart';
   wire();
   initChart();
+  if (!getToken()) { bootAway(); return showLogin(); }
+  try {
+    S.user = await api('/api/auth/check');
+  } catch (e) { return; }
   try {
     const j = await api('/api/bootstrap');
     for (const sp of j.symbols) S.symbols[sp.symbol] = sp;
     S.symList = j.symbols.map(s => s.symbol);
     S.account = j.account;
     S.deals = j.history || [];
-    $('#boot-msg').textContent = 'Authenticating account…';
-    $('#boot-fill').style.width = '42%';
+    if ($('#boot-msg')) $('#boot-msg').textContent = 'Authenticating account…';
+    if ($('#boot-fill')) $('#boot-fill').style.width = '42%';
     await Promise.all(S.symList.map(async s => {
       try {
         const h = await api(`/api/history?symbol=${s}&tf=D1&limit=2`);
@@ -1110,25 +1179,31 @@ async function boot() {
         else if (h.bars.length === 1) S.prevDay[s] = h.bars[0].o;
       } catch (e) {}
     }));
-    $('#boot-msg').textContent = 'Synchronizing market data…';
-    $('#boot-fill').style.width = '78%';
+    if ($('#boot-msg')) $('#boot-msg').textContent = 'Synchronizing market data…';
+    if ($('#boot-fill')) $('#boot-fill').style.width = '78%';
     buildMarketWatch();
     renderHistory();
     renderAccount();
     await selectSymbol(S.cur);
     const minBoot = new Promise(r2 => setTimeout(r2, 2300));
-    $('#boot-fill').style.width = '100%';
-    $('#boot-msg').textContent = 'Connected to OmyaTrade-Real03';
+    if ($('#boot-fill')) $('#boot-fill').style.width = '100%';
+    if ($('#boot-msg')) $('#boot-msg').textContent = 'Connected to OmyaTrade-Real03';
     await minBoot;
-    $('#boot').classList.add('done');
+    initAdmin({ api, toast, $, $$, S, fmtMoney, sfx, getSymbol: () => S.cur });
+    $('#boot')?.classList.add('done');
+    $('#login').classList.add('hidden');
     $('#app').classList.remove('hidden');
     chart.resize();
     connectFeed();
-    setTimeout(() => $('#boot').remove(), 900);
+    setTimeout(() => $('#boot')?.remove(), 900);
   } catch (e) {
-    $('#boot-msg').textContent = 'Connection failed — retrying…';
-    $('#srv-dot');
-    setTimeout(boot, 2200);
+    console.error('[boot] failed:', e);
+    if ($('#boot-msg')) $('#boot-msg').textContent = 'Connection failed — retrying…';
+    if (getToken()) setTimeout(boot, 2200);
   }
+}
+function bootAway() {
+  const b = $('#boot');
+  if (b) { b.classList.add('done'); setTimeout(() => b.remove(), 650); }
 }
 boot();

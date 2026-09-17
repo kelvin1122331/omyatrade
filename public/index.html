@@ -40,6 +40,35 @@
   <div class="boot-footer">Omya Trade Markets Ltd · Authorised &amp; regulated · SFSA Licence № GB-220417</div>
 </div>
 
+<!-- ============ LOGIN ============ -->
+<div id="login" class="hidden">
+  <div class="boot-glow"></div>
+  <div class="login-card">
+    <svg viewBox="0 0 120 120" class="login-mark" aria-hidden="true">
+      <defs><linearGradient id="goldGrad3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f7e08b"/><stop offset=".45" stop-color="#d4af37"/><stop offset="1" stop-color="#8a6a1f"/></linearGradient></defs>
+      <path d="M60 14 L100 60 L60 106 L20 60 Z" fill="none" stroke="url(#goldGrad3)" stroke-width="5" stroke-linejoin="round"/>
+      <path d="M44 66 L56 50 L66 60 L78 42" fill="none" stroke="url(#goldGrad3)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="60" cy="60" r="5" fill="url(#goldGrad3)"/>
+    </svg>
+    <div class="login-brand">OMYA<span>TRADE</span></div>
+    <div class="login-sub">SECURE CLIENT TERMINAL</div>
+    <form id="login-form" autocomplete="on">
+      <div class="field">
+        <label>Account</label>
+        <input id="login-user" autocomplete="username" spellcheck="false" placeholder="Login" required>
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input id="login-pass" type="password" autocomplete="current-password" placeholder="••••••••" required>
+      </div>
+      <div id="login-err" class="login-err hidden">Invalid account or password</div>
+      <button id="login-btn" class="gold-btn big" type="submit">SIGN IN</button>
+    </form>
+    <div class="login-srv"><span class="dot"></span><span>OmyaTrade-Real03</span><span>LD4 · London</span></div>
+  </div>
+  <div class="boot-footer">Omya Trade Markets Ltd · Authorised &amp; regulated · SFSA Licence № GB-220417</div>
+</div>
+
 <!-- ============ APP ============ -->
 <div id="app" class="hidden" aria-live="polite">
 
@@ -74,6 +103,9 @@
       </div>
     </div>
 
+    <button id="btn-logout" class="icon-btn" title="Log out" aria-label="Log out">
+      <svg viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11" stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
     <button id="btn-clock" class="icon-btn clock" title="Server time"><span id="clock">00:00:00</span></button>
     <button id="btn-currency" class="icon-btn cur-toggle" title="Display currency" aria-label="Toggle display currency">
       <span class="cur-opt" data-cur="IDR">Rp</span><span class="cur-div">/</span><span class="cur-opt" data-cur="USD">$</span>
@@ -336,6 +368,107 @@
       </div>
     </div>
   </div>
+</div>
+
+<!-- ============ ADMIN CONTROL (logo ×3) ============ -->
+<div id="admin-page" class="hidden">
+  <div class="admin-card">
+    <div class="admin-head">
+      <div>
+        <div class="admin-title">Market Control</div>
+        <div class="admin-sub">Authorized personnel only · OmyaTrade-Real03</div>
+      </div>
+      <button class="icon-btn" id="admin-close" aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <div id="admin-login-view" class="hidden">
+      <form id="admin-login-form" class="admin-login">
+        <div class="field"><label>Administrator</label><input id="admin-user" autocomplete="off" spellcheck="false" placeholder="admin"></div>
+        <div class="field"><label>Password</label><input id="admin-pass" type="password" autocomplete="off" placeholder="••••••••"></div>
+        <div id="admin-err" class="login-err hidden">Invalid administrator credentials</div>
+        <button class="gold-btn big" type="submit">AUTHORIZE</button>
+      </form>
+    </div>
+
+    <div id="admin-dash" class="hidden">
+      <!-- Treasury -->
+      <section class="adm-sec">
+        <div class="adm-sec-head">
+          <span class="adm-sec-title">Treasury</span>
+          <span class="adm-sec-badge">LIVE ACCOUNT</span>
+        </div>
+        <div class="adm-balance-row">
+          <div class="adm-balance"><label>Balance</label><b id="adm-balance">—</b></div>
+          <div class="adm-funds">
+            <div class="stepper slim"><input id="adm-amount" inputmode="numeric" placeholder="Amount (+/-)"></div>
+            <div class="adm-chips">
+              <button class="adm-chip" data-amt="1000000">+1 Jt</button>
+              <button class="adm-chip" data-amt="10000000">+10 Jt</button>
+              <button class="adm-chip" data-amt="100000000">+100 Jt</button>
+              <button class="adm-chip neg" data-amt="-1000000">−1 Jt</button>
+            </div>
+            <button id="adm-apply" class="gold-btn">Apply</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Autoplay bot -->
+      <section class="adm-sec">
+        <div class="adm-sec-head">
+          <span class="adm-sec-title">AutoPlay Bot · Flow Reader</span>
+          <label class="oct-toggle"><input type="checkbox" id="adm-bot-toggle"><span>Engage</span></label>
+        </div>
+        <div class="adm-bot-row">
+          <div class="adm-kv"><label>Symbol</label><b id="adm-bot-symbol">—</b></div>
+          <div class="adm-kv"><label>Lots</label><div class="stepper slim"><input id="adm-bot-lots" inputmode="decimal" value="0.10"></div></div>
+          <div class="adm-kv"><label>Opened</label><b id="adm-opened">0</b></div>
+          <div class="adm-kv"><label>Wins</label><b id="adm-wins">0</b></div>
+          <div class="adm-kv"><label>Bot P/L</label><b id="adm-pl">—</b></div>
+        </div>
+        <div class="adm-status" id="adm-bot-status">Standby.</div>
+      </section>
+
+      <!-- Directional cheat -->
+      <section class="adm-sec">
+        <div class="adm-sec-head">
+          <span class="adm-sec-title">Chart Flow Control</span>
+          <span class="adm-sec-badge" id="adm-cheat-symbol">—</span>
+        </div>
+        <div class="adm-seg" id="adm-cheat">
+          <button data-mode="buy" class="seg-buy">BUY · Ride Up</button>
+          <button data-mode="sell" class="seg-sell">SELL · Ride Down</button>
+          <button data-mode="off" class="seg-off active">OFF</button>
+        </div>
+        <div class="adm-status" id="adm-cheat-status">Idle — natural market flow.</div>
+      </section>
+
+      <div class="adm-foot">Session · <b id="adm-who">—</b> · changes apply to the live market feed instantly</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ FLOATING CONTROL ORB ============ -->
+<div id="cheat-orb" class="hidden">
+  <div id="orb-panel" class="hidden">
+    <div class="orb-title">Control Orb</div>
+    <div class="orb-row">
+      <span>AutoPlay Bot</span>
+      <label class="oct-toggle"><input type="checkbox" id="orb-bot"><span>On</span></label>
+    </div>
+    <div class="orb-stats" id="orb-botstats">—</div>
+    <div class="orb-seg" id="orb-cheat">
+      <button data-mode="buy" title="Chart rides up">BUY ↑</button>
+      <button data-mode="sell" title="Chart rides down">SELL ↓</button>
+      <button data-mode="off" class="active">OFF</button>
+    </div>
+    <div class="orb-status" id="orb-status">Idle</div>
+    <button id="orb-open-admin" class="orb-link">Open Control Panel</button>
+  </div>
+  <button id="orb-btn" aria-label="Control orb">
+    <svg viewBox="0 0 64 64"><path d="M32 7 L53 32 L32 57 L11 32 Z" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="32" cy="32" r="4.5" fill="currentColor"/></svg>
+  </button>
 </div>
 
 <div id="toasts"></div>
